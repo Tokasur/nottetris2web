@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Not Tetris 2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="description" content="Not Tetris 2 — the physics-based tetris by stabyourself.net, playable in your browser. Keyboard, touch and gamepad supported.">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Not Tetris 2">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="480" height="432"></canvas>
+    <button id="fsbtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+  </div>
+
+  <div id="touch" aria-hidden="true">
+    <div class="pad dpad">
+      <div class="btn up" data-btn="up">&#9650;</div>
+      <div class="btn left" data-btn="left">&#9664;</div>
+      <div class="btn down" data-btn="down">&#9660;</div>
+      <div class="btn right" data-btn="right">&#9654;</div>
+    </div>
+    <div class="pad mid">
+      <div class="btn pill" data-btn="escape">select</div>
+      <div class="btn pill" data-btn="enter">start</div>
+    </div>
+    <div class="pad rotate">
+      <div class="btn round" data-btn="rotl">&#8634;</div>
+      <div class="btn round" data-btn="rotr">&#8635;</div>
+    </div>
+  </div>
+
+  <footer id="hint">
+    <b>&#8592;&#8594;</b> move &nbsp;&middot;&nbsp; <b>&#8595;</b> drop &nbsp;&middot;&nbsp; <b>Z</b>/<b>X</b> rotate &nbsp;&middot;&nbsp; <b>Enter</b> start/pause &nbsp;&middot;&nbsp; <b>Esc</b> back &nbsp;&middot;&nbsp; gamepad supported &nbsp;&middot;&nbsp;
+    <a href="https://stabyourself.net/nottetris2/" target="_blank" rel="noopener">original game by stabyourself.net</a>
+  </footer>
+
+  <script src="js/planck.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/gfx.js"></script>
+  <script src="js/sfx.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/menu.js"></script>
+  <script src="js/rocket.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

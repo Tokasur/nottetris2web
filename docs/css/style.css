@@ -1,0 +1,164 @@
+/* Not Tetris 2 — web port */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: #101014;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: "Courier New", monospace;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+#game {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+}
+
+#fsbtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  color: #888;
+  background: rgba(40, 40, 48, 0.6);
+  border: 1px solid #444;
+  border-radius: 8px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.touchmode #fsbtn { display: flex; }
+
+#hint {
+  color: #9a9aa5;
+  font-size: 12px;
+  text-align: center;
+  padding: 8px 4px 10px;
+  line-height: 1.6;
+}
+#hint b { color: #d8d8e0; }
+#hint a { color: #7fb3ff; }
+.touchmode #hint { display: none; }
+
+/* ---------------- touch controls ---------------- */
+
+:root {
+  --dbtn: min(56px, 13vw);
+  --rbtn: min(72px, 16vw);
+}
+
+#touch {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 6px 8px calc(10px + env(safe-area-inset-bottom));
+  touch-action: none;
+}
+.touchmode #touch { display: flex; }
+
+.pad { display: grid; }
+
+.dpad {
+  grid-template-columns: var(--dbtn) var(--dbtn) var(--dbtn);
+  grid-template-rows: var(--dbtn) var(--dbtn);
+  grid-template-areas: ". u ." "l d r";
+  gap: 4px;
+}
+.dpad .up { grid-area: u; }
+.dpad .left { grid-area: l; }
+.dpad .down { grid-area: d; }
+.dpad .right { grid-area: r; }
+
+.mid {
+  grid-template-columns: auto;
+  gap: 10px;
+  align-self: end;
+  padding-bottom: 6px;
+}
+
+.rotate {
+  grid-template-columns: var(--rbtn) var(--rbtn);
+  gap: min(14px, 2.5vw);
+  align-items: end;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(58, 58, 70, 0.85);
+  color: #cfcfda;
+  border: 2px solid #55556a;
+  border-radius: 12px;
+  font-size: 22px;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.btn.round {
+  width: var(--rbtn);
+  height: var(--rbtn);
+  border-radius: 50%;
+  font-size: 34px;
+}
+
+.btn.pill {
+  padding: 6px min(14px, 2.2vw);
+  border-radius: 20px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.btn.held,
+.btn:active {
+  background: rgba(120, 120, 150, 0.95);
+  color: #fff;
+  border-color: #9090b0;
+}
+
+/* landscape phones: overlay the pads over the letterbox sides of the stage */
+@media (orientation: landscape) and (max-height: 500px) {
+  .touchmode #touch {
+    position: absolute;
+    inset: 0;
+    align-items: flex-end;
+    padding: 0 10px calc(8px + env(safe-area-inset-bottom));
+    pointer-events: none;
+    background: none;
+  }
+  .touchmode #touch .pad { pointer-events: auto; }
+  .touchmode #touch .mid {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    align-self: auto;
+    padding-bottom: 0;
+  }
+  .touchmode #stage { position: static; }
+  .btn { opacity: 0.75; }
+}
