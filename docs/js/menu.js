@@ -137,7 +137,9 @@ NT.MENU = (function () {
   }
 
   var stMenu = {
-    enter: function () { NT.bgColor = "#000"; },
+    // setMusic here (idempotent) revives the music on every path back to the
+    // menu: quitting a paused game, quitting during the game-over collapse...
+    enter: function () { NT.bgColor = "#000"; SFX.setMusicPaused(false); SFX.setMusic(musicKey()); },
     update: function (dt) {
       blinkTimer += dt;
       if (blinkTimer > SELECT_BLINK) { selectBlink = !selectBlink; blinkTimer = 0; }

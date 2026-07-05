@@ -26,6 +26,7 @@ NT.GAME = (function () {
   var mode = "A";                 // 'A' | 'B'
   var phase = "playing";          // 'playing' | 'failing'
   var paused = false;
+  var quitConfirm = false;        // "quit game?" overlay (select pressed in game)
 
   var g = null;                   // physics game
   var score = 0, level = 0, lines = 0, linesCleared = 0;
@@ -47,6 +48,7 @@ NT.GAME = (function () {
     mode = m;
     phase = "playing";
     paused = false;
+    quitConfirm = false;
     score = 0; level = 0; linesCleared = 0;
     lines = 0;                       // mode B: pieces stacked counter ("tiles")
     targetSpeed = speedForLevel(0);
@@ -67,7 +69,7 @@ NT.GAME = (function () {
   // ---------- update ----------
 
   function update(dt) {
-    if (paused) return;
+    if (paused || quitConfirm) return;
 
     // line-clear freeze (physics halted, rows blink)
     if (cutTimer < CUT_DURATION) {
@@ -102,7 +104,9 @@ NT.GAME = (function () {
     }
 
     g.world.step(dt, 8, 3);
+    PHYS.clampVelocities(g);
 
+    if (phase === "playing" && !g.pendingLand && PHYS.activeTouchesGround(g)) g.pendingLand = true;
     if (g.pendingLand && phase === "playing") handleLand();
 
     if (mode === "A" && phase === "playing") {
@@ -284,6 +288,21 @@ NT.GAME = (function () {
     }
 
     drawScores(ctx);
+
+    if (quitConfirm) drawQuitConfirm(ctx);
+  }
+
+  function drawQuitConfirm(ctx) {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.fillRect(0, 0, 160, 144);
+    var lc = GFX.lightColor(NT.options.hue);
+    ctx.fillStyle = "rgb(" + lc[0] + "," + lc[1] + "," + lc[2] + ")";
+    ctx.fillRect(27, 51, 106, 42);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(29, 53, 102, 38);
+    GFX.print("quit game!", 40, 58, "fontwhite");
+    GFX.print("select: yes", 36, 71, "fontwhite");
+    GFX.print("start:  no", 36, 81, "fontwhite");
   }
 
   function drawScores(ctx) {
@@ -306,16 +325,31 @@ NT.GAME = (function () {
   // ---------- input ----------
 
   function press(name) {
+    if (quitConfirm) {
+      if (name === "escape") {
+        // confirmed: back to menu, making sure the music comes back with us
+        quitConfirm = false;
+        SFX.setMusicPaused(false);
+        SFX.setMusic(NT.MENU.musicKey());
+        NT.setState("menu");
+      } else if (name === "enter" || name === "rotl" || name === "rotr") {
+        quitConfirm = false;
+        if (!paused) SFX.setMusicPaused(false);
+        SFX.play("pause");
+      }
+      return;
+    }
     if (name === "enter") {
       togglePause();
       return;
     }
+    if (name === "escape" && phase !== "failed") {
+      quitConfirm = true;
+      SFX.setMusicPaused(true);
+      SFX.play("pause");
+      return;
+    }
     if (phase === "playing") {
-      if (name === "escape") {
-        // abandon: back to menu (music keeps playing, like the original)
-        NT.setState("menu");
-        return;
-      }
       if (!paused && (cutTimer === CUT_DURATION || mode === "B")) {
         if (name === "left" || name === "right") SFX.play("move");
         else if (name === "rotl" || name === "rotr") SFX.play("turn");
@@ -338,9 +372,10 @@ NT.GAME = (function () {
     loadA: loadA,
     loadB: loadB,
     setPause: setPause,
-    get info() { return { mode: mode, phase: phase, paused: paused, score: score, level: level, lines: lines, bodies: g ? g.settled.length : 0, cutting: cutTimer < CUT_DURATION }; },
+    get info() { return { mode: mode, phase: phase, paused: paused, quitConfirm: quitConfirm, score: score, level: level, lines: lines, bodies: g ? g.settled.length : 0, cutting: cutTimer < CUT_DURATION }; },
     get finalScore() { return score; },
-    // automated-test hook: replace the falling piece with piece `kind` at x
+    // automated-test hooks: physics world access + replace the falling piece
+    _testWorld: function () { return g; },
     _testDrop: function (kind, x, y) {
       if (!g || !g.active) return false;
       g.world.destroyBody(g.active);

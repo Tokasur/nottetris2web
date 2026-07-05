@@ -32,6 +32,7 @@ window.NT = window.NT || {};
   // ---------- state machine ----------
   NT.setState = function (name, arg) {
     NT.state = name;
+    document.body.classList.toggle("ingame", name === "game"); // hides the ▲ touch button
     var st = NT.STATES[name];
     if (st && st.enter) st.enter(arg);
   };
@@ -194,8 +195,9 @@ window.NT = window.NT || {};
       if (document.hidden) {
         if (NT.state === "game") NT.GAME.setPause(true);
         else NT.SFX.setMusicPaused(true);
-      } else if (NT.state !== "game") {
-        NT.SFX.setMusicPaused(false);
+      } else {
+        if (NT.SFX.unlocked) NT.SFX.unlock(); // revive the context if the tab switch suspended it
+        if (NT.state !== "game") NT.SFX.setMusicPaused(false);
       }
     });
 

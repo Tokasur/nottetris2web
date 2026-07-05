@@ -12,17 +12,21 @@ NT.PHYS = (function () {
   var pl = window.planck;
   var Vec2 = pl.Vec2;
 
-  pl.Settings.maxTranslation = 100; // don't engine-cap soft drop speed
-
   var GRAVITY = 15.625;         // 500 px/s²
   var DENSITY = 0.05;           // full piece mass = 4 * 1 * 0.05 = 0.2
   var FRICTION = 0.2;           // box2d default, matches the original's slidy feel
   var WALL_FRICTION = 0.00001;  // side walls (original)
   var DAMPING = 0.5;
-  var MIN_AREA = 0.01;          // discard slivers below this (block²)
+  var MIN_AREA = 0.04;          // discard slivers below this (block²) — ~2.5 px² on screen
   var MIN_INRADIUS = 0.0375;    // original largeenough(): 0.04 * meter(30) px / 32
   var GROUP_TOL = 0.0625;       // original: 2 px vertex proximity
-  var MIN_MASS = 0.002;
+  var MIN_MASS = 0.01;          // mass floor: keeps piece/debris ratio ≤ 20:1 so the
+                                // solver can't slingshot tiny fragments
+  var LIGHT_MASS = 0.03;        // below this, extra damping calms debris quickly
+  var MAX_SPEED = 22;           // settled bodies hard speed cap (blocks/s)
+  var MAX_SPIN = 15;            // settled bodies spin cap (rad/s)
+  var FLYING_SPEED = 6;         // a dynamic body faster than this can't count as landing
+  var REST_SPEED = 2.5;         // relative speed below which piece+support "move together"
 
   var ROWS = 18;
   var FIELD_LEFT = 1.75, FIELD_RIGHT = 12;
@@ -151,12 +155,79 @@ NT.PHYS = (function () {
       var ba = fa.getBody(), bb = fb.getBody();
       if (ba !== g.active && bb !== g.active) return;
       var other = ba === g.active ? fb : fa;
-      var ud = other.getUserData();
-      if (ud && (ud.side === "left" || ud.side === "right")) return;
+      if (!isLandingFixture(g, other)) return;
       g.pendingLand = true;
     });
 
     return g;
+  }
+
+  // walls/ceiling and flying debris don't count as ground: a fragment that
+  // bumps the falling piece mid-air must not steal control of it. A dynamic
+  // body only counts when it is slow AND itself resting on something (a body
+  // touching nothing but the piece is airborne, whatever its speed).
+  function isLandingFixture(g, fixture) {
+    var ud = fixture.getUserData();
+    if (ud && (ud.side === "left" || ud.side === "right" || ud.side === "ceiling")) return false;
+    var body = fixture.getBody();
+    if (body.isDynamic()) {
+      var v = body.getLinearVelocity();
+      if (v.x * v.x + v.y * v.y > FLYING_SPEED * FLYING_SPEED) return false;
+      if (!isSupported(g, body)) return false;
+    }
+    return true;
+  }
+
+  // does this body rest on anything besides the active piece and the walls?
+  function isSupported(g, body) {
+    for (var ce = body.getContactList(); ce; ce = ce.next) {
+      if (!ce.contact.isTouching()) continue;
+      var fa = ce.contact.getFixtureA();
+      var otherF = fa.getBody() === body ? ce.contact.getFixtureB() : fa;
+      if (otherF.getBody() === g.active) continue;
+      var ud = otherF.getUserData();
+      if (ud && (ud.side === "left" || ud.side === "right" || ud.side === "ceiling")) continue;
+      return true;
+    }
+    return false;
+  }
+
+  // catches the case begin-contact can't see: the piece riding a body that
+  // was moving too fast at first touch and has since slowed down. Requires a
+  // small relative velocity ("moving together"), so the aftermath of a debris
+  // strike — bodies bouncing apart — doesn't read as a landing.
+  function activeTouchesGround(g) {
+    var a = g.active;
+    if (!a) return false;
+    var av = a.getLinearVelocity();
+    for (var ce = a.getContactList(); ce; ce = ce.next) {
+      var c = ce.contact;
+      if (!c.isTouching()) continue;
+      var fa = c.getFixtureA();
+      var other = fa.getBody() === a ? c.getFixtureB() : fa;
+      if (!isLandingFixture(g, other)) continue;
+      var ov = other.getBody().getLinearVelocity();
+      var dx = av.x - ov.x, dy = av.y - ov.y;
+      if (dx * dx + dy * dy < REST_SPEED * REST_SPEED) return true;
+    }
+    return false;
+  }
+
+  // hard cap for settled bodies: debris can push around but never rocket off
+  function clampVelocities(g) {
+    for (var i = 0; i < g.settled.length; i++) {
+      var b = g.settled[i];
+      if (!b.isAwake()) continue;
+      var v = b.getLinearVelocity();
+      var s2 = v.x * v.x + v.y * v.y;
+      if (s2 > MAX_SPEED * MAX_SPEED) {
+        var k = MAX_SPEED / Math.sqrt(s2);
+        b.setLinearVelocity(new Vec2(v.x * k, v.y * k));
+      }
+      var w = b.getAngularVelocity();
+      if (w > MAX_SPIN) b.setAngularVelocity(MAX_SPIN);
+      else if (w < -MAX_SPIN) b.setAngularVelocity(-MAX_SPIN);
+    }
   }
 
   function spawnPiece(g, kind, speed) {
@@ -281,7 +352,6 @@ NT.PHYS = (function () {
           type: "dynamic",
           position: pos,
           angle: angle,
-          bullet: true,
           linearDamping: DAMPING
         });
         var localPolys = [];
@@ -303,7 +373,11 @@ NT.PHYS = (function () {
         }
         if (!nb.getFixtureList()) { g.world.destroyBody(nb); continue; }
         if (nb.getMass() < MIN_MASS) {
-          nb.setMassData({ mass: MIN_MASS, center: nb.getLocalCenter(), I: Math.max(nb.getInertia(), 1e-4) });
+          nb.setMassData({ mass: MIN_MASS, center: nb.getLocalCenter(), I: Math.max(nb.getInertia(), 1e-3) });
+        }
+        if (nb.getMass() < LIGHT_MASS) {
+          nb.setLinearDamping(1.5);
+          nb.setAngularDamping(1);
         }
         nb.setLinearVelocity(vel);
         nb.setAngularVelocity(angVel);
@@ -343,6 +417,8 @@ NT.PHYS = (function () {
     removeRow: removeRow,
     destroyGround: destroyGround,
     allBelow: allBelow,
-    worldPolys: worldPolys
+    worldPolys: worldPolys,
+    clampVelocities: clampVelocities,
+    activeTouchesGround: activeTouchesGround
   };
 })();

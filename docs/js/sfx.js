@@ -92,9 +92,15 @@ NT.SFX = (function () {
   }
 
   function unlock() {
-    if (unlocked) return;
+    // runs on every gesture: iOS/tab-switch can re-suspend the context long
+    // after the first unlock, so always try to revive it
     unlocked = true;
-    if (actx && actx.state === "suspended") actx.resume();
+    if (actx && actx.state !== "running") {
+      try {
+        var p = actx.resume();
+        if (p && p.catch) p.catch(function () {});
+      } catch (e) {}
+    }
     syncMusic();
   }
 
