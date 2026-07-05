@@ -93,6 +93,13 @@ body {
 .dpad .down { grid-area: d; }
 .dpad .right { grid-area: r; }
 
+/* the up arrow only navigates menus; hide it during play (visibility, not
+   display: the other buttons must not shift under the player's thumb) */
+.ingame .dpad .up {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .mid {
   grid-template-columns: auto;
   gap: 10px;
