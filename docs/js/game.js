@@ -11,14 +11,20 @@ NT.GAME = (function () {
   var DOWN_FORCE = 0.625;         // applyForce(20) -> accel ~3.1 blocks/s²
   var TORQUE = 2.8;               // spin-up to 3 rad/s; I piece turns slower than O
   var MAX_ANGVEL = 3;
-  var SOFT_DROP_MAX = 12;         // blocks/s
+  var SOFT_DROP_MAX = 15.625;     // 500 px/s (original)
   var RELEASE_DECEL = 62.5;       // 2000 px/s²
   var LOSING_Y = 0;
   var CLEARED_Y = 20.25;          // 648 px: everything fell out after game over
 
+  var STEP = 1 / 60;              // fixed physics timestep (frame-rate independent)
+  var MAX_SUBSTEPS = 4;           // below 15 fps the game slows instead of exploding
+
   var CUT_DURATION = 1.2;
   var CUT_BLINKS = 7;
-  var LINE_THRESHOLD = 8.1;       // block² per row
+  var LINE_THRESHOLD = 7.9;       // block² per row. The original nominally uses
+                                  // 8.1 but its raycast-based area estimator
+                                  // overestimates tilted shapes by a few percent;
+                                  // 7.9 on exact areas matches its behavior
   var DENSITY_INTERVAL = 1 / 30;
   var SCORE_ADD_TIME = 0.5;
   var PREVIEW_ROT_SPEED = 1;      // rad/s
@@ -40,6 +46,7 @@ NT.GAME = (function () {
   var areas = [];
   var removedRows = [];
   var snapshot = null;
+  var accumulator = 0;
 
   function rand7() { return 1 + Math.floor(Math.random() * 7); }
   function speedForLevel(lv) { return (100 + lv * 7) / 32; }
@@ -56,7 +63,7 @@ NT.GAME = (function () {
     scoreAddTimer = SCORE_ADD_TIME; lastScoreAdd = 0;
     densityTimer = 0; previewRot = 0; newLevelBeep = false;
     areas = new Array(PHYS.ROWS); for (var i = 0; i < PHYS.ROWS; i++) areas[i] = 0;
-    removedRows = []; snapshot = null;
+    removedRows = []; snapshot = null; accumulator = 0;
 
     g = PHYS.newGame();
     PHYS.spawnPiece(g, rand7(), targetSpeed);
@@ -87,24 +94,18 @@ NT.GAME = (function () {
     if (scoreAddTimer < SCORE_ADD_TIME) scoreAddTimer = Math.min(SCORE_ADD_TIME, scoreAddTimer + dt);
     previewRot = (previewRot + PREVIEW_ROT_SPEED * dt) % (Math.PI * 2);
 
-    if (phase === "playing" && g.active) {
-      var body = g.active;
-      if (INPUT.held("rotr") && body.getAngularVelocity() < MAX_ANGVEL) body.applyTorque(TORQUE, true);
-      if (INPUT.held("rotl") && body.getAngularVelocity() > -MAX_ANGVEL) body.applyTorque(-TORQUE, true);
-      if (INPUT.held("left")) body.applyForceToCenter(new planck.Vec2(-SIDE_FORCE, 0), true);
-      if (INPUT.held("right")) body.applyForceToCenter(new planck.Vec2(SIDE_FORCE, 0), true);
-
-      var v = body.getLinearVelocity();
-      if (INPUT.held("down")) {
-        if (v.y > SOFT_DROP_MAX) body.setLinearVelocity(new planck.Vec2(v.x, SOFT_DROP_MAX));
-        else body.applyForceToCenter(new planck.Vec2(0, DOWN_FORCE), true);
-      } else if (v.y > targetSpeed) {
-        body.setLinearVelocity(new planck.Vec2(v.x, Math.max(targetSpeed, v.y - RELEASE_DECEL * dt)));
-      }
+    // fixed-timestep loop: forces reapplied each substep (box2d clears them
+    // after every step — otherwise control authority would drop at low fps)
+    accumulator += dt;
+    var sub = 0;
+    while (accumulator >= STEP && sub < MAX_SUBSTEPS) {
+      applyControls();
+      g.world.step(STEP, 10, 4);
+      PHYS.clampVelocities(g);
+      accumulator -= STEP;
+      sub++;
     }
-
-    g.world.step(dt, 8, 3);
-    PHYS.clampVelocities(g);
+    if (sub === MAX_SUBSTEPS) accumulator = 0; // drop backlog: slow-mo, no spiral
 
     if (phase === "playing" && !g.pendingLand && PHYS.activeTouchesGround(g)) g.pendingLand = true;
     if (g.pendingLand && phase === "playing") handleLand();
@@ -123,6 +124,23 @@ NT.GAME = (function () {
       g.active = null;
       SFX.play("gameover2");
       NT.setState("failed");
+    }
+  }
+
+  function applyControls() {
+    if (phase !== "playing" || !g.active) return;
+    var body = g.active;
+    if (INPUT.held("rotr") && body.getAngularVelocity() < MAX_ANGVEL) body.applyTorque(TORQUE, true);
+    if (INPUT.held("rotl") && body.getAngularVelocity() > -MAX_ANGVEL) body.applyTorque(-TORQUE, true);
+    if (INPUT.held("left")) body.applyForceToCenter(new planck.Vec2(-SIDE_FORCE, 0), true);
+    if (INPUT.held("right")) body.applyForceToCenter(new planck.Vec2(SIDE_FORCE, 0), true);
+
+    var v = body.getLinearVelocity();
+    if (INPUT.held("down")) {
+      if (v.y > SOFT_DROP_MAX) body.setLinearVelocity(new planck.Vec2(v.x, SOFT_DROP_MAX));
+      else body.applyForceToCenter(new planck.Vec2(0, DOWN_FORCE), true);
+    } else if (v.y > targetSpeed) {
+      body.setLinearVelocity(new planck.Vec2(v.x, Math.max(targetSpeed, v.y - RELEASE_DECEL * STEP)));
     }
   }
 
@@ -175,6 +193,8 @@ NT.GAME = (function () {
       }
 
       for (var k = 0; k < rows.length; k++) PHYS.removeRow(g, rows[k]);
+      PHYS.settleBurst(g, 8);    // just resolve cut overlaps off-screen; the
+                                 // falling cascade stays visible like the original
       cutTimer = 0;
       PHYS.spawnPiece(g, nextPiece, targetSpeed);   // preview rerolls when the freeze ends
     } else {

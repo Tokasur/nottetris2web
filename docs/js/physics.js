@@ -12,6 +12,19 @@ NT.PHYS = (function () {
   var pl = window.planck;
   var Vec2 = pl.Vec2;
 
+  // let piles actually fall asleep between impacts (defaults are so low the
+  // heap jitters forever and keeps re-exciting itself); 0.12 blocks/s is
+  // about 1 screen px/s — the freeze is invisible
+  pl.Settings.linearSleepTolerance = 0.12;
+  pl.Settings.angularSleepTolerance = 0.12;
+  pl.Settings.timeToSleep = 0.4;
+  // interlocked cut fragments overlap by nature; tolerating a hair of overlap
+  // with a gentler pushback stops the solver from fighting those overlaps
+  // forever (perpetual jitter) — kept small so pieces stack flush like the
+  // original (whose pixel-unit world had essentially zero slop)
+  pl.Settings.linearSlop = 0.01;
+  pl.Settings.baumgarte = 0.15;
+
   var GRAVITY = 15.625;         // 500 px/s²
   var DENSITY = 0.05;           // full piece mass = 4 * 1 * 0.05 = 0.2
   var FRICTION = 0.2;           // box2d default, matches the original's slidy feel
@@ -20,11 +33,15 @@ NT.PHYS = (function () {
   var MIN_AREA = 0.04;          // discard slivers below this (block²) — ~2.5 px² on screen
   var MIN_INRADIUS = 0.0375;    // original largeenough(): 0.04 * meter(30) px / 32
   var GROUP_TOL = 0.0625;       // original: 2 px vertex proximity
-  var MIN_MASS = 0.01;          // mass floor: keeps piece/debris ratio ≤ 20:1 so the
-                                // solver can't slingshot tiny fragments
-  var LIGHT_MASS = 0.03;        // below this, extra damping calms debris quickly
-  var MAX_SPEED = 22;           // settled bodies hard speed cap (blocks/s)
-  var MAX_SPIN = 15;            // settled bodies spin cap (rad/s)
+  var MIN_MASS = 0.002;         // natural floor (MIN_AREA×DENSITY): the original
+                                // has virtually no mass floor, and heavy slivers
+                                // prop pieces apart and ruin the snug stacking
+  // asymmetric speed caps: gravity only ever pulls DOWN, so upward velocity
+  // on a settled body can only come from solver ejections — cap it low
+  // while leaving free fall untouched (a 22 b/s cap let debris climb 15
+  // blocks: the whole field; 4.5 climbs 0.65 block, lively but safe)
+  var UP_MAX = 4.5, SIDE_MAX = 10, DOWN_MAX = 20, SPIN_MAX = 8; // settled bodies
+  var ACT_UP_MAX = 6, ACT_SIDE_MAX = 10, ACT_SPIN_MAX = 8;      // falling piece
   var FLYING_SPEED = 6;         // a dynamic body faster than this can't count as landing
   var REST_SPEED = 2.5;         // relative speed below which piece+support "move together"
 
@@ -213,20 +230,37 @@ NT.PHYS = (function () {
     return false;
   }
 
-  // hard cap for settled bodies: debris can push around but never rocket off
+  // asymmetric caps (up is negative y): debris can fall and shuffle but never
+  // rocket off; the active piece gets looser caps so a boiling pile can't
+  // catapult it up to the losing line either
   function clampVelocities(g) {
     for (var i = 0; i < g.settled.length; i++) {
       var b = g.settled[i];
       if (!b.isAwake()) continue;
-      var v = b.getLinearVelocity();
-      var s2 = v.x * v.x + v.y * v.y;
-      if (s2 > MAX_SPEED * MAX_SPEED) {
-        var k = MAX_SPEED / Math.sqrt(s2);
-        b.setLinearVelocity(new Vec2(v.x * k, v.y * k));
-      }
-      var w = b.getAngularVelocity();
-      if (w > MAX_SPIN) b.setAngularVelocity(MAX_SPIN);
-      else if (w < -MAX_SPIN) b.setAngularVelocity(-MAX_SPIN);
+      clampBody(b, UP_MAX, SIDE_MAX, DOWN_MAX, SPIN_MAX);
+    }
+    if (g.active) clampBody(g.active, ACT_UP_MAX, ACT_SIDE_MAX, 1e9, ACT_SPIN_MAX);
+  }
+
+  function clampBody(b, up, side, down, spin) {
+    var v = b.getLinearVelocity();
+    var vx = v.x, vy = v.y, changed = false;
+    if (vy < -up) { vy = -up; changed = true; }
+    else if (vy > down) { vy = down; changed = true; }
+    if (vx > side) { vx = side; changed = true; }
+    else if (vx < -side) { vx = -side; changed = true; }
+    if (changed) b.setLinearVelocity(new Vec2(vx, vy));
+    var w = b.getAngularVelocity();
+    if (w > spin) b.setAngularVelocity(spin);
+    else if (w < -spin) b.setAngularVelocity(-spin);
+  }
+
+  // quiet settle steps, run while the line-clear freeze hides the board:
+  // resolves the overlaps a cut leaves behind before the player sees them
+  function settleBurst(g, n) {
+    for (var i = 0; i < n; i++) {
+      g.world.step(1 / 60, 10, 4);
+      clampVelocities(g);
     }
   }
 
@@ -347,6 +381,7 @@ NT.PHYS = (function () {
         (byGroup[root] = byGroup[root] || []).push(parts[a3]);
       }
 
+      var firstGroup = true;
       for (var key in byGroup) {
         var nb = g.world.createBody({
           type: "dynamic",
@@ -373,14 +408,15 @@ NT.PHYS = (function () {
         }
         if (!nb.getFixtureList()) { g.world.destroyBody(nb); continue; }
         if (nb.getMass() < MIN_MASS) {
-          nb.setMassData({ mass: MIN_MASS, center: nb.getLocalCenter(), I: Math.max(nb.getInertia(), 1e-3) });
+          nb.setMassData({ mass: MIN_MASS, center: nb.getLocalCenter(), I: Math.max(nb.getInertia(), 1e-4) });
         }
-        if (nb.getMass() < LIGHT_MASS) {
-          nb.setLinearDamping(1.5);
-          nb.setAngularDamping(1);
+        // original asymmetry: the primary fragment restarts at rest (its body
+        // is recreated), the split-off groups inherit the parent's momentum
+        if (!firstGroup) {
+          nb.setLinearVelocity(vel);
+          nb.setAngularVelocity(angVel);
         }
-        nb.setLinearVelocity(vel);
-        nb.setAngularVelocity(angVel);
+        firstGroup = false;
         nb.setUserData({ kind: ud.kind, cut: true, polys: localPolys });
         newSettled.push(nb);
       }
@@ -419,6 +455,7 @@ NT.PHYS = (function () {
     allBelow: allBelow,
     worldPolys: worldPolys,
     clampVelocities: clampVelocities,
+    settleBurst: settleBurst,
     activeTouchesGround: activeTouchesGround
   };
 })();
